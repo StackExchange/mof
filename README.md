@@ -1,5 +1,5 @@
 # mof
-Package mof parses and marshals Managed Object Format (MOF) structures
+Package mof parses and marshals Managed Object Format (MOF) structures.
 
 # docs
 
