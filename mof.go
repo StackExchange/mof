@@ -22,7 +22,7 @@ import (
 // is used to perform this matching, so json struct tags are honored.
 //
 func Unmarshal(data []byte, v interface{}) error {
-	t, err := parse(string(data))
+	t, err := parse(data)
 	if err != nil {
 		return err
 	}

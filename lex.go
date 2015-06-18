@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 )
 
 // item represents a token or text string returned from the scanner.
@@ -56,11 +55,10 @@ type stateFn func(*lexer) stateFn
 
 // lexer holds the state of the scanner.
 type lexer struct {
-	input   string    // the string being scanned
+	input   []rune    // the string being scanned
 	state   stateFn   // the next lexing function to enter
 	pos     pos       // current position in the input
 	start   pos       // start position of this item
-	width   pos       // width of last rune read from input
 	lastPos pos       // position of most recent item returned by nextItem
 	items   chan item // channel of scanned items
 }
@@ -68,12 +66,10 @@ type lexer struct {
 // next returns the next rune in the input.
 func (l *lexer) next() rune {
 	if int(l.pos) >= len(l.input) {
-		l.width = 0
 		return eof
 	}
-	r, w := utf8.DecodeRuneInString(l.input[l.pos:])
-	l.width = pos(w)
-	l.pos += l.width
+	r := l.input[l.pos]
+	l.pos++
 	return r
 }
 
@@ -86,12 +82,12 @@ func (l *lexer) peek() rune {
 
 // backup steps back one rune. Can only be called once per call of next.
 func (l *lexer) backup() {
-	l.pos -= l.width
+	l.pos--
 }
 
 // emit passes an item back to the client.
 func (l *lexer) emit(t itemType) {
-	l.items <- item{t, l.start, l.input[l.start:l.pos]}
+	l.items <- item{t, l.start, string(l.input[l.start:l.pos])}
 	l.start = l.pos
 }
 
@@ -120,7 +116,7 @@ func (l *lexer) ignore() {
 // the previous item returned by nextItem. Doing it this way
 // means we don't have to worry about peek double counting.
 func (l *lexer) lineNumber() int {
-	return 1 + strings.Count(l.input[:l.lastPos], "\n")
+	return 1 + strings.Count(string(l.input[:l.lastPos]), "\n")
 }
 
 // errorf returns an error token and terminates the scan by passing
@@ -138,7 +134,7 @@ func (l *lexer) nextItem() item {
 }
 
 // lex creates a new scanner for the input string.
-func lex(input string) *lexer {
+func lex(input []rune) *lexer {
 	l := &lexer{
 		input: input,
 		items: make(chan item),
@@ -226,7 +222,8 @@ func (l *lexer) scanNumber() bool {
 func lexWord(l *lexer) stateFn {
 	first := true
 	for {
-		switch r := l.next(); {
+		r := l.next()
+		switch {
 		case isWord(r):
 			// absorb
 		case unicode.IsNumber(r) && !first:

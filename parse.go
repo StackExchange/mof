@@ -5,16 +5,19 @@
 package mof
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"runtime"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Tree is the representation of a single parsed configuration.
 type tree struct {
 	Root *classNode // top-level root of the tree.
-	text string     // text parsed to create the template (or its parent)
+	text []byte     // text parsed to create the template (or its parent)
 	// Parsing only; cleared after parse.
 	lex       *lexer
 	token     [1]item // one-token lookahead for parser.
@@ -24,7 +27,7 @@ type tree struct {
 // Parse returns a Tree, created by parsing the configuration described in the
 // argument string. If an error is encountered, parsing stops and an empty Tree
 // is returned with the error.
-func parse(text string) (t *tree, err error) {
+func parse(text []byte) (t *tree, err error) {
 	t = &tree{
 		text: text,
 	}
@@ -148,14 +151,47 @@ func (t *tree) stopParse() {
 // the template for execution. If either action delimiter string is empty, the
 // default ("{{" or "}}") is used. Embedded template definitions are added to
 // the treeSet map.
-func (t *tree) Parse(text string) (err error) {
+func (t *tree) Parse(text []byte) (err error) {
 	defer t.recover(&err)
-	t.startParse(lex(text))
+	runes, err := toRunes(text)
+	if err != nil {
+		return err
+	}
+	t.startParse(lex(runes))
 	t.text = text
 	t.Root = newClass(t.peek().pos)
 	t.parse(t.Root)
 	t.stopParse()
 	return nil
+}
+
+func toRunes(text []byte) ([]rune, error) {
+	var runes []rune
+	if bytes.HasPrefix(text, []byte{0, 0, 0xFE, 0xFF}) {
+		return nil, fmt.Errorf("mof: unsupported encoding: UTF-32, big-endian")
+	} else if bytes.HasPrefix(text, []byte{0xFF, 0xFE, 0, 0}) {
+		return nil, fmt.Errorf("mof: unsupported encoding: UTF-32, little-endian")
+	} else if bytes.HasPrefix(text, []byte{0xFE, 0xFF}) {
+		return nil, fmt.Errorf("mof: unsupported encoding: UTF-16, big-endian")
+	} else if bytes.HasPrefix(text, []byte{0xFF, 0xFE}) {
+		// UTF-16, little-endian
+		for len(text) > 0 {
+			u := binary.LittleEndian.Uint16(text)
+			runes = append(runes, rune(u))
+			text = text[2:]
+		}
+		return runes, nil
+	}
+	// Assume UTF-8.
+	for len(text) > 0 {
+		r, s := utf8.DecodeRune(text)
+		if r == utf8.RuneError {
+			return nil, fmt.Errorf("mof: unrecognized encoding")
+		}
+		runes = append(runes, r)
+		text = text[s:]
+	}
+	return runes, nil
 }
 
 // parse is the top-level parser for a conf.
